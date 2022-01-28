@@ -1,0 +1,28 @@
+#importação de pacotes a serem utilizados
+library(dplyr);library(jsonlite);library(SparkR)
+
+
+#importação de arquivos do armazenamento
+bank_campanha=read_json("/dbfs/mnt/bronze/bank_campanha.json", simplifyVector=TRUE) %>% as.data.frame()
+bank_compra=read_json("/dbfs/mnt/bronze/bank_compra.json", simplifyVector=TRUE) %>% as.data.frame()
+bank_pessoal=read_json("/dbfs/mnt/bronze/bank_pessoal.json", simplifyVector=TRUE) %>% as.data.frame()
+
+#cruzando dados a partir da variavel "id"
+bank_aux=inner_join(bank_pessoal,bank_campanha)
+bank_dados=left_join(bank_aux,bank_compra)
+
+#criando objetos para manipulação em sql
+bank_d=createDataFrame(bank_dados)
+createOrReplaceTempView(bank_d, "bank_dados")
+
+%sql
+/* para idenficar o bloco de dados com outra linguagem, basta por % seguido do identificador da linguagem na primeira linha */
+/* para criar a tabela, basta usar o comando em comentário abaixo */
+ 
+--CREATE TABLE dados_prata.bank_dados AS (SELECT * FROM bank_dados)
+ 
+/* o comando abaixo apaga a tabela criada e insere os dados compilados, foi feito nessa maneira para que esse notebook possa ser rodado outras vezes */
+ 
+TRUNCATE TABLE dados_prata.bank_dados; 
+INSERT INTO dados_prata.bank_dados
+SELECT * FROM bank_dados

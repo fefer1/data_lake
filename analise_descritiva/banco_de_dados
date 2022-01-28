@@ -1,0 +1,404 @@
+#importação do arquivo gerado pelo pipeline de etl para a conta de armazenamento 
+library(SparkR)
+bank_dados=read.df("/mnt/prata", source = "csv", sep=";", header = "true", inferSchema = "true")
+
+#importação de pacotes a serem utilizados para a analise descritiva
+library(dplyr);library(ggplot2);library(caret);library(gridExtra);
+library(scales);library(stringr);library(arules)
+
+#ajustando classificacao das variaveis e ajustes
+#remover variavel id
+bank_dados=bank_dados[2:ncol(bank_dados)]
+ 
+#marital
+bank_dados$marital=bank_dados$marital %>% as.factor()
+ 
+#education
+bank_dados$education=bank_dados$education %>% as.factor()
+ 
+#default
+bank_dados$default=bank_dados$default %>% as.factor()
+ 
+#housing
+bank_dados$housing=bank_dados$housing %>% as.factor()
+ 
+#loan
+bank_dados$loan=bank_dados$loan %>% as.factor()
+ 
+#contact
+bank_dados$contact=bank_dados$contact %>% as.factor()
+ 
+#poutcome
+bank_dados$poutcome=bank_dados$poutcome %>% as.factor()
+ 
+#y
+bank_dados$y=bank_dados$y %>% as.factor()
+ 
+#month
+bank_dados$month=bank_dados$month %>% 
+  factor(ordered=TRUE, 
+            levels=c("jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"))
+ 
+#day
+bank_dados$day=bank_dados$day %>% 
+  factor(ordered=TRUE)
+ 
+#job
+for (i in 1:length(bank_dados$job)){
+  if (bank_dados$job[i]=="admin."){
+    bank_dados$job[i]="administration"
+  } else {
+    bank_dados$job[i]=bank_dados$job[i]
+  }
+}
+bank_dados$job=bank_dados$job %>% as.factor()
+ 
+#pdays
+#como clusterizar a variavel
+
+bank_pdays=bank_dados %>% select(pdays) %>% filter(pdays!=-1)
+k.max <- 15
+wss <- sapply(1:k.max, 
+              function(k){kmeans(bank_pdays, k, nstart=50,iter.max = 15 )$tot.withinss})
+wss
+plot(1:k.max, wss,
+     type="b", pch = 19, frame = FALSE, 
+     xlab="Number of clusters K",
+     ylab="Total within-clusters sum of squares")
+
+{set.seed(2022)
+table(discretize(bank_pdays$pdays, method="cluster", breaks=3))
+}
+
+#categorização
+for (i in 1:length(bank_dados$pdays)){
+  if (bank_dados$pdays[i]==-1){
+    bank_dados$pdays[i]="no contact"
+  } else {
+    if (bank_dados$pdays[i]<150){
+      bank_dados$pdays[i]="< 5 months"
+    } else {
+      if (bank_dados$pdays[i]<300){
+        bank_dados$pdays[i]="5-10 months"
+      } else {
+        bank_dados$pdays[i]="> 10 months"
+      }
+    }
+  }
+}
+bank_dados$pdays=bank_dados$pdays %>% as.factor()
+ 
+#previous
+#como clusterizar a variavel
+bank_previous=bank_dados %>% select(previous) %>% filter(previous!=0)
+k.max <- 15
+wss <- sapply(1:k.max, 
+              function(k){kmeans(bank_previous, k, nstart=50,iter.max = 15 )$tot.withinss})
+wss
+plot(1:k.max, wss,
+     type="b", pch = 19, frame = FALSE, 
+     xlab="Number of clusters K",
+     ylab="Total within-clusters sum of squares")
+
+{set.seed(2022)
+table(discretize(bank_previous$previous, method="cluster", breaks=3))
+}
+
+#clusterização
+for (i in 1:length(bank_dados$previous)){
+  if (bank_dados$previous[i]==0){
+    bank_dados$previous[i]="no contact"
+  } else {
+    if (bank_dados$previous[i]<3){
+      bank_dados$previous[i]="< 3 contacts"
+    } else {
+      if (bank_dados$previous[i]<300){
+        bank_dados$previous[i]="3-10 contacts"
+      } else {
+        bank_dados$previous[i]="> 10 contacts"
+      }
+    }
+  }
+}
+bank_dados$previous=bank_dados$previous %>% as.factor()
+
+#tema e cores para os graficos de rosca
+theme_rsc=theme(line = element_line(color="#ebebeb",colour ="#ebebeb", size=1),
+                axis.title.y = element_blank(),
+                axis.text.y = element_blank(),
+                axis.ticks.y = element_blank(),
+                axis.ticks.x = element_blank(),
+                axis.text.x = element_blank(),
+                axis.title.x = element_blank(),
+                plot.title=element_blank(),
+                plot.margin = margin(1,0,2,1,"cm"),
+                panel.grid=element_blank(),
+                legend.position = "none",
+                panel.background = element_rect(fill="#F2F2F2"),
+                aspect.ratio = 1)
+
+theme_his=theme(line = element_line(color="#ebebeb",colour ="#ebebeb", size=1),
+                plot.title=element_blank(),
+                legend.position = "none",
+                panel.background = element_rect(fill="#F2F2F2"),
+                aspect.ratio = 1)
+
+
+cor=c("#002842","#1C5473","#186680","#157D96", "#5999AF", "#86C0D1", "#B3E7E8", "#5BC7C5", "#009494", "#007A78", "#00615F", "#003B3A")
+cor2=c("#002842", "#5999AF", "#5BC7C5", "#007A78")
+
+#graficos das variaveis
+#age
+#histograma 
+his_idade=bank_dados %>%  ggplot(aes(x=age)) + 
+  geom_histogram(fill="#002842", breaks=c(0,18,30,40,50,60,80,100), color="#5999AF") +
+  ylab("Frequência") + theme_his
+
+#job
+#distribuição geral de job
+job=round(prop.table(table(bank_dados$job)),2) %>% as.data.frame()
+colnames(job)=c("job","Freq");job
+job$Freq=label_percent(accuracy=1,suffix = "%)", decimal.mark=",")(job$Freq)
+job$text=str_c(job$job, job$Freq, sep=" (")
+
+#grafico de rosca
+ymax_job = c(0.114,0.329,0.362,0.389,0.598,0.648,0.683,0.775,0.796,0.964,0.993,1)
+ymin_job = c(0,0.114,0.329,0.362,0.389,0.598,0.648,0.683,0.775,0.796,0.964,0.993)
+ros_job=ggplot(job) +
+  geom_rect(aes(fill=job, ymax=ymax_job, ymin=ymin_job, xmax=3.3, xmin=2)) +
+  coord_polar(theta="y") + xlim(c(0, 4.5))+
+  theme_rsc+
+  geom_text(aes(y = c(0.11,0.23,0.325,0.35,0.405,0.645,0.685,0.75,0.78,0.85,0.93,0.99), x=4.4),
+            label = job$text, data = job, size=4.5)
+
+#visualização graficos age+job
+withr::with_options(
+  list(ggplot2.discrete.fill = cor),
+  print(grid.arrange(his_idade, ros_job, ncol=2, nrow=1))
+)
+
+#marital
+#distribuição geral de marital
+marital=round(prop.table(table(bank_dados$marital)),2) %>% as.data.frame()
+colnames(marital)=c("marital","Freq");marital
+marital$Freq=label_percent(accuracy=1,suffix = "%)", decimal.mark=",")(marital$Freq)
+marital$text=str_c(marital$marital, marital$Freq, sep=" (")
+
+#grafico de rosca
+ymax_marital = c(0.12,0.72,1)
+ymin_marital = c(0,0.12,0.72)
+ros_marital=ggplot(marital) +
+  geom_rect(aes(fill=marital, ymax=ymax_marital, ymin=ymin_marital, xmax=3.3, xmin=2)) +
+  coord_polar(theta="y") + xlim(c(0, 4.5))+
+  theme_rsc+labs(title=expression(paste(bold("Representatividade das Categorias da Variável "), bolditalic("marital"))))+
+  geom_text(aes(y = c(0.11,0.38,0.85), x=4.4),
+            label = marital$text, data = marital, size=4.5)
+
+#education
+#distribuição geral de education
+education=round(prop.table(table(bank_dados$education)),2) %>% as.data.frame()
+colnames(education)=c("education","Freq");education
+education$Freq=label_percent(accuracy=1,suffix = "%)", decimal.mark=",")(education$Freq)
+education$text=str_c(education$education, education$Freq, sep=" (")
+
+#grafico de rosca
+ymax_education = c(0.15,0.66,0.95,1)
+ymin_education = c(0,0.15,0.66,0.95)
+ros_education=ggplot(education) +
+  geom_rect(aes(fill=education, ymax=ymax_education, ymin=ymin_education, xmax=3.3, xmin=2)) +
+  coord_polar(theta="y") + xlim(c(0, 4.5))+
+  theme_rsc+labs(title=expression(paste(bold("Representatividade das Categorias da Variável "), bolditalic("education"))))+
+  geom_text(aes(y = c(0.12,0.36,0.8,0.92), x=4.4),
+            label = education$text, data = education, size=4.5)
+
+#visualização graficos marital+education
+withr::with_options(
+  list(ggplot2.discrete.fill = cor2),
+  print(grid.arrange(ros_marital, ros_education, ncol=2, nrow=1))
+)
+
+#default
+#distribuição geral de default
+default=round(prop.table(table(bank_dados$default)),2) %>% as.data.frame()
+colnames(default)=c("default","Freq");default
+default$Freq=label_percent(accuracy=1,suffix = "%)", decimal.mark=",")(default$Freq)
+default$text=str_c(default$default, default$Freq, sep=" (")
+
+#grafico de rosca
+ymax_default = c(0.98,1)
+ymin_default = c(0,0.98)
+ros_default=ggplot(default) +
+  geom_rect(aes(fill=default, ymax=ymax_default, ymin=ymin_default, xmax=3.3, xmin=2)) +
+  coord_polar(theta="y") + xlim(c(0, 4.5))+
+  theme_rsc+
+  geom_text(aes(y = c(0.36,0.94), x=4.4),
+            label = default$text, data = default, size=4.5)
+ 
+ #balance
+ #histograma
+his_balance=bank_dados %>%  ggplot(aes(x=balance)) + 
+  geom_histogram(fill="#002842", breaks=c(min(bank_dados$balance),-2000,0,2000,4000,6000,8000,10000,12000,15000,20000,25000,max(bank_dados$balance)), color="#5999AF") +
+  ylab("Frequência")  + theme_his
+
+#visualização graficos default+balance
+withr::with_options(
+  list(ggplot2.discrete.fill = cor2),
+  print(grid.arrange(his_balance, ros_default, ncol=2, nrow=1))
+)
+
+#housing
+#distribuição da variavel housing
+housing=round(prop.table(table(bank_dados$housing)),2) %>% as.data.frame()
+colnames(housing)=c("housing","Freq");housing
+housing$Freq=label_percent(accuracy=1,suffix = "%)", decimal.mark=",")(housing$Freq)
+housing$text=str_c(housing$housing, housing$Freq, sep=" (")
+
+#grafico de rosca
+ymax_housing = c(0.44,1)
+ymin_housing = c(0,0.44)
+ros_housing=ggplot(housing) +
+  geom_rect(aes(fill=housing, ymax=ymax_housing, ymin=ymin_housing, xmax=3.3, xmin=2)) +
+  coord_polar(theta="y") + xlim(c(0, 4.5))+
+  theme_rsc+
+  geom_text(aes(y = c(0.18,0.68), x=4.4),
+            label = housing$text, data = housing, size=4.5)
+
+#loan
+#distribuicao da variavel loan
+loan=round(prop.table(table(bank_dados$loan)),2) %>% as.data.frame()
+colnames(loan)=c("loan","Freq");loan
+loan$Freq=label_percent(accuracy=1,suffix = "%)", decimal.mark=",")(loan$Freq)
+loan$text=str_c(loan$loan, loan$Freq, sep=" (")
+
+#grafico de rosca
+ymax_loan = c(0.84,1)
+ymin_loan = c(0,0.84)
+ros_loan=ggplot(loan) +
+  geom_rect(aes(fill=loan, ymax=ymax_loan, ymin=ymin_loan, xmax=3.3, xmin=2)) +
+  coord_polar(theta="y") + xlim(c(0, 4.5))+
+  theme_rsc+ 
+  geom_text(aes(y = c(0.36,0.88), x=4.4),
+            label = loan$text, data = loan, size=4.5)
+
+#visualização graficos housing+loan
+withr::with_options(
+  list(ggplot2.discrete.fill = cor2),
+  print(grid.arrange(ros_housing, ros_loan, ncol=2, nrow=1))
+)
+
+#contact
+#distribuicao da variavel
+contact=round(prop.table(table(bank_dados$contact)),2) %>% as.data.frame()
+colnames(contact)=c("contact","Freq");contact
+contact$Freq=label_percent(accuracy=1,suffix = "%)", decimal.mark=",")(contact$Freq)
+contact$text=str_c(contact$contact, contact$Freq, sep=" (")
+
+#grafico de rosca
+ymax_contact = c(0.65,0.71,1)
+ymin_contact = c(0,0.65,0.71)
+ros_contact=ggplot(contact) +
+  geom_rect(aes(fill=contact, ymax=ymax_contact, ymin=ymin_contact, xmax=3.3, xmin=2)) +
+  coord_polar(theta="y") + xlim(c(0, 4.5))+
+  theme_rsc+
+  geom_text(aes(y = c(0.3,0.7,0.85), x=4.4),
+            label = contact$text, data = contact, size=4.5)
+
+#duration
+#histograma 
+his_duration=bank_dados %>%  ggplot(aes(x=duration)) + 
+  geom_histogram(fill="#002842", color="#5999AF") +
+  ylab("Frequência") + theme_his
+
+#visualização graficos contact+duration
+withr::with_options(
+  list(ggplot2.discrete.fill = cor2),
+  print(grid.arrange(his_duration, ros_contact, ncol=2, nrow=1))
+)
+
+#day
+#grafico de barras
+bar_day=bank_dados %>%  ggplot(aes(x=day)) + 
+  geom_bar(fill="#002842", color="#5999AF") +
+  ylab("Frequência") + theme_his
+
+#month
+#grafico de barras
+bar_month=bank_dados %>%  ggplot(aes(x=month)) + 
+  geom_bar(fill="#002842", color="#5999AF") +
+  ylab("Frequência") + theme_his
+
+#visualização graficos day+month
+withr::with_options(
+  list(ggplot2.discrete.fill = cor2),
+  print(grid.arrange(bar_day, bar_month, ncol=2, nrow=1))
+)
+
+#campaign
+his_campaign=bank_dados %>%  ggplot(aes(x=campaign)) + 
+  geom_histogram(fill="#002842", breaks=c(0,2,5,10,20,25,63), color="#5999AF") +
+  ylab("Frequência") + theme_his
+
+#pdays
+#distribuição da variavel pdays
+order=c("no contact", "< 5 months", "5-10 months", "> 10 months")
+pdays=round(prop.table(table(bank_dados$pdays)),2)[order] %>% as.data.frame()
+colnames(pdays)=c("pdays","Freq");pdays
+pdays$Freq=label_percent(accuracy=1,suffix = "%)", decimal.mark=",")(pdays$Freq)
+pdays$text=str_c(pdays$pdays, pdays$Freq, sep=" (")
+
+#grafico de rosca
+ymax_pdays = c(0.82,0.84,0.92,1)
+ymin_pdays = c(0,0.82,0.84,0.92)
+ros_pdays=ggplot(pdays) +
+  geom_rect(aes(fill=pdays, ymax=ymax_pdays, ymin=ymin_pdays, xmax=3.3, xmin=2)) +
+  coord_polar(theta="y") + xlim(c(0, 4.5))+
+  theme_rsc+geom_text(aes(y = c(0.35,0.815,0.86,0.91), x=4.4),
+            label = pdays$text, data = pdays, size=4.5)
+
+#visualização graficos campaign+pdays 
+withr::with_options(
+  list(ggplot2.discrete.fill = cor2),
+  print(grid.arrange(his_campaign, ros_pdays, ncol=2, nrow=1))
+)
+
+#previous
+#distribuição da variavel
+order=c("no contact", "< 3 contacts", "3-10 contacts", "> 10 contacts")
+previous=round(prop.table(table(bank_dados$previous)),2)[order] %>% as.data.frame()
+colnames(previous)=c("previous","Freq");previous
+previous$Freq=label_percent(accuracy=1,suffix = "%)", decimal.mark=",")(previous$Freq)
+previous$text=str_c(previous$previous, previous$Freq, sep=" (")
+
+#grafico de rosca
+ymax_previous = c(0.82,0.94,0.97,1)
+ymin_previous = c(0,0.82,0.94,0.97)
+ros_previous=ggplot(previous) +
+  geom_rect(aes(fill=previous, ymax=ymax_previous, ymin=ymin_previous, xmax=3.3, xmin=2)) +
+  coord_polar(theta="y") + xlim(c(0, 4.5))+
+  theme_rsc+geom_text(aes(y = c(0.35,0.85,0.91,0.95), x=4.4),
+            label = previous$text, data = previous, size=4.5)
+
+#poutcome
+#distribuicao da variavel
+order=c("unknown", "other", "success", "failure")
+poutcome=round(prop.table(table(bank_dados$poutcome)),2)[order] %>% as.data.frame()
+colnames(poutcome)=c("poutcome","Freq");poutcome
+poutcome$Freq=label_percent(accuracy=1,suffix = "%)", decimal.mark=",")(poutcome$Freq)
+poutcome$text=str_c(poutcome$poutcome, poutcome$Freq, sep=" (")
+
+#grafico de rosca
+ymax_poutcome = c(0.82,0.86,0.89,1)
+ymin_poutcome = c(0,0.82,0.86,0.89)
+ros_poutcome=ggplot(poutcome) +
+  geom_rect(aes(fill=poutcome, ymax=ymax_poutcome, ymin=ymin_poutcome, xmax=3.3, xmin=2)) +
+  coord_polar(theta="y") + xlim(c(0, 4.5))+
+  theme_rsc+
+  labs(title=expression(paste(bold("Representatividade das Categorias da Variável "), bolditalic("poutcome"))))+
+  geom_text(aes(y = c(0.35,0.825,0.855,0.91), x=4.4),
+            label = poutcome$text, data = poutcome, size=4.5)
+
+#visualização graficos previous+poutcome
+withr::with_options(
+  list(ggplot2.discrete.fill = cor2),
+  print(grid.arrange(ros_previous, ros_poutcome, ncol=2, nrow=1))
+)

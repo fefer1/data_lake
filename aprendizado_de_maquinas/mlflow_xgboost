@@ -1,0 +1,90 @@
+#iniciando o mlflow
+library(mlflow)
+install_mlflow()
+
+#importação de pacotes a serem utilizados para a modelagem
+library(dplyr);library(SparkR);library(caret);library(ggplot2);library(kernlab);library(carrier);
+library(e1071);library(pROC);library(MLmetrics);library(plotROC);library(MLeval);library(xgboost)
+
+#lendo o banco de dados para treino do modelo
+bank_train=read.df("/user/hive/warehouse/dados_ouro.db/bank_train", sep=";", header = "true", inferSchema = "true") %>% as.data.frame()
+
+#criando as variáveis dummies
+dummies = dummyVars(~ job+marital+education+default+housing+loan+contact+day+month+pdays+previous+poutcome, data = bank_train, fullRank = TRUE)
+
+#aplicando ao banco de dados para receber as variaveis dummies
+dummies_p = predict(dummies, newdata = bank_train)
+
+#juntando o banco de dados com as variaveis dummies
+bank_train = cbind(bank_train, dummies_p)
+
+#criando banco de dados apenas com as variaveis dummies
+bank_train_d = bank_train[,c(1,6,12,13,17:ncol(bank_train))]
+
+#preparando os dados para o modelo xgboost
+bank_train_xg = as.matrix(bank_train_d[,-5])
+
+#execução do modelo de xgboost
+with(mlflow_start_run(), {
+  
+  #setseed
+  set.seed(2022)
+  
+  #controle da modelagem dos dados
+  control=trainControl(method="repeatedcv", number=3, repeats=2, sampling="up",
+                       summaryFunction = multiClassSummary, classProbs=TRUE, savePredictions = TRUE,
+                       allowParallel = TRUE, verboseIter = FALSE, returnData = FALSE)
+  
+  #criando o modelo de teste
+  xgboost = train(bank_train_xg, bank_train$y, method="xgbTree",
+                      tuneGrid = expand.grid(nrounds=100,
+                                             max_depth = 20, 
+                                             eta = 0.1,
+                                             gamma=0,
+                                             colsample_bytree = 0.5,
+                                             min_child_weight = 1,
+                                             subsample = 1),
+               trControl=control)
+  
+  #avaliando o modelo para construção da curva roc e auc
+  av = evalm(xgboost$pred[,c(3,4,2,1)], col="#5999AF", rlinethick=1, plot="r")
+  
+  #definindo as metricas para qualidade do ajuste do modelo
+  precisao = xgboost$results[,11]
+  sensibilidade = xgboost$results[,14]
+  especificidade = xgboost$results[,15]
+  auc = av$stdres$Group1[13,1]
+  
+  #definindo parametros
+  nrounds=xgboost$bestTune[,1]
+  max_depth=xgboost$bestTune[,2]
+  eta=xgboost$bestTune[,3]
+  gamma=xgboost$bestTune[,4]
+  
+  #armazenar parametros utilizados
+  mlflow_log_param("nrounds", nrounds)
+  mlflow_log_param("max_depth", max_depth)
+  mlflow_log_param("eta", eta)
+  mlflow_log_param("gamma", gamma)
+  
+  #armazenar as métricas para comparação 
+  mlflow_log_metric("precisão", precisao)
+  mlflow_log_metric("sensibilidade", sensibilidade)
+  mlflow_log_metric("especificidade", especificidade)
+  mlflow_log_metric("AUC", auc) 
+  
+  #armazenar modelo
+  predictor <- crate(function(x) predict(xgboost,.x))
+  mlflow_log_model(predictor, "xgboost")
+                     
+  #curva ROC
+  roc=av$roc+xlab("erros de previsão")+ylab("acertos de previsão")+theme_bw()+
+  theme(legend.position="none")+
+  geom_text(aes(x=0.94, y=0.185, label=paste("AUC:",av$stdres$Group1[13,1])))
+  
+  ggsave(filename = "/dbfs/user/hive/warehouse/dados_ouro.db/roc_xgboost.png", roc, device='png')
+  
+  #armazenar a curva ROC
+  mlflow_log_artifact("/dbfs/user/hive/warehouse/dados_ouro.db/roc_xgboost.png") 
+    
+})

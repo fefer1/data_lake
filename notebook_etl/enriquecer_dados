@@ -1,0 +1,129 @@
+#importação de pacotes a serem utilizados para a analise descritiva
+library(dplyr);library(SparkR);library(caret)
+
+#importação do arquivo gerado pelo pipeline de etl para a conta de armazenamento 
+bank_dados=read.df("/mnt/prata", source = "csv", sep=";", header = "true", inferSchema = "true") %>% as.data.frame()
+
+#ajustando classificacao das variaveis e ajustes
+#remover variavel id
+bank_dados=bank_dados[2:ncol(bank_dados)]
+ 
+#marital
+bank_dados$marital=bank_dados$marital %>% as.factor()
+ 
+#education
+bank_dados$education=bank_dados$education %>% as.factor()
+ 
+#default
+bank_dados$default=bank_dados$default %>% as.factor()
+ 
+#housing
+bank_dados$housing=bank_dados$housing %>% as.factor()
+ 
+#loan
+bank_dados$loan=bank_dados$loan %>% as.factor()
+ 
+#contact
+bank_dados$contact=bank_dados$contact %>% as.factor()
+ 
+#poutcome
+bank_dados$poutcome=bank_dados$poutcome %>% as.factor()
+ 
+#y
+bank_dados$y=bank_dados$y %>% as.factor()
+ 
+#month
+bank_dados$month=bank_dados$month %>% 
+  factor(ordered=TRUE, 
+            levels=c("jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"))
+ 
+#day
+bank_dados$day=bank_dados$day %>% 
+  factor(ordered=TRUE)
+ 
+#job
+for (i in 1:length(bank_dados$job)){
+  if (bank_dados$job[i]=="admin."){
+    bank_dados$job[i]="administration"
+  } else {
+    bank_dados$job[i]=bank_dados$job[i]
+  }
+}
+bank_dados$job=bank_dados$job %>% as.factor()
+ 
+#pdays
+for (i in 1:length(bank_dados$pdays)){
+  if (bank_dados$pdays[i]==-1){
+    bank_dados$pdays[i]="no contact"
+  } else {
+    if (bank_dados$pdays[i]<150){
+      bank_dados$pdays[i]="< 5 months"
+    } else {
+      if (bank_dados$pdays[i]<300){
+        bank_dados$pdays[i]="5-10 months"
+      } else {
+        bank_dados$pdays[i]="> 10 months"
+      }
+    }
+  }
+}
+bank_dados$pdays=bank_dados$pdays %>% as.factor()
+ 
+#previous
+for (i in 1:length(bank_dados$previous)){
+  if (bank_dados$previous[i]==0){
+    bank_dados$previous[i]="no contact"
+  } else {
+    if (bank_dados$previous[i]<3){
+      bank_dados$previous[i]="< 3 contacts"
+    } else {
+      if (bank_dados$previous[i]<300){
+        bank_dados$previous[i]="3-10 contacts"
+      } else {
+        bank_dados$previous[i]="> 10 contacts"
+      }
+    }
+  }
+}
+bank_dados$previous=bank_dados$previous %>% as.factor()
+ 
+#mostrando o banco de dados
+display(bank_dados)
+
+#separar dados em treino e teste para o aprendizado de máquinas
+set.seed(2022)
+sepp=createDataPartition(bank_dados$y,p=0.75,list=FALSE)
+bank_train=bank_dados[sepp,]
+bank_test=bank_dados[-sepp,]
+
+#criando objetos para manipulação em sql
+bank_tr=createDataFrame(bank_train)
+createOrReplaceTempView(bank_tr, "bank_train")
+ 
+bank_ts=createDataFrame(bank_test)
+createOrReplaceTempView(bank_ts, "bank_test")
+
+%sql
+/* para idenficar o bloco de dados com outra linguagem, basta por % seguido do identificador da linguagem na primeira linha */
+/* para criar a tabela, basta usar o comando em comentário abaixo */
+ 
+--CREATE TABLE dados_ouro.bank_test AS (SELECT * FROM bank_test)
+ 
+/* o comando abaixo apaga a tabela criada e insere os dados compilados, foi feito nessa maneira para que esse notebook possa ser rodado outras vezes */
+ 
+TRUNCATE TABLE dados_ouro.bank_test;
+INSERT INTO dados_ouro.bank_test
+SELECT * FROM bank_test
+
+%sql
+/* para idenficar o bloco de dados com outra linguagem, basta por % seguido do identificador da linguagem na primeira linha */
+/* para criar a tabela, basta usar o comando em comentário abaixo */
+ 
+--CREATE TABLE dados_ouro.bank_train AS (SELECT * FROM bank_train)
+ 
+/* o comando abaixo apaga a tabela criada e insere os dados compilados, foi feito nessa maneira para que esse notebook possa ser rodado outras vezes */
+ 
+TRUNCATE TABLE dados_ouro.bank_train;
+INSERT INTO dados_ouro.bank_train
+SELECT * FROM bank_train
+

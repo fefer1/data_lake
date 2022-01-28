@@ -7,3 +7,4 @@ Este repositório está separado da seguinte maneira:
 3. aprendizado de maquinas: onde estão armazenados os notebooks sobre a construção do aprendizado de maquinas dentro do databricks via mlflow
 4. inferencia: onde estão armazenados os notebooks de aplicação da inferencia a partir do modelo de aprendizado escolhido.
 
+O banco de dados utilizado no estudo de caso está disponível neste repositório.

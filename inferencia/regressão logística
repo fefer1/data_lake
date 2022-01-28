@@ -1,0 +1,21 @@
+#iniciando o mlflow
+library(mlflow)
+install_mlflow()
+
+#importação de pacotes a serem utilizados na inferencia
+library(dplyr);library(SparkR);library(caret);library(MLeval);library(carrier);library(xgboost);library(stats)
+
+#importar o modelo registrado
+regressao=mlflow_load_model("models:/regressao_logistica/1")
+
+#carregar novo conjunto de dados
+bank_test=read.df("/user/hive/warehouse/dados_ouro.db/bank_test", sep=";", header = "true", inferSchema = "true") %>% as.data.frame()
+bank_test$y=bank_test$y%>%as.factor()
+
+#inferencia sobre os novos dados
+previsao=mlflow_predict(regressao, bank_test)%>%as.data.frame()
+colnames(previsao)[1]="y"
+previsao$y=previsao$y%>%as.factor()
+
+#matriz de confusão e medidas de acertividade
+confusionMatrix(previsao$y,bank_test$y)

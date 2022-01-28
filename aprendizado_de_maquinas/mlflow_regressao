@@ -1,0 +1,58 @@
+#iniciando o mlflow
+library(mlflow)
+install_mlflow()
+
+#importação de pacotes a serem utilizados para a analise descritiva
+library(dplyr);library(SparkR);library(caret);library(ggplot2);library(gridExtra);library(kernlab);
+library(e1071);library(pROC);library(MLmetrics);library(plotROC);library(MLeval);library(carrier);library(xgboost)
+
+#lendo o banco de dados para treino do modelo
+bank_train=read.df("/user/hive/warehouse/dados_ouro.db/bank_train", sep=";", header = "true", inferSchema = "true") %>% as.data.frame()
+
+#aplicação do modelo de regressão logistica
+with(mlflow_start_run(), {
+  
+  #setseed
+  set.seed(2022)
+  
+  #controle da modelagem dos dados
+  control=trainControl(method="repeatedcv", number=10, repeats=3, sampling="up",
+                     summaryFunction = multiClassSummary, classProbs=TRUE, savePredictions = TRUE)
+  
+  #criando o modelo de teste
+  rl = train(y~., data=bank_train, method="glm",
+                      family="binomial",
+                      trControl=control)
+  
+  #avaliando o modelo para construção da curva roc e auc
+  av = evalm(rl$pred[,c(3,4,2,1)], col="#5999AF", rlinethick=1, plot="r")
+  
+  #definindo as metricas para qualidade do ajuste do modelo
+  precisao = rl$results[,5]
+  sensibilidade = rl$results[,8]
+  especificidade = rl$results[,9]
+  auc = av$stdres$Group1[13,1]
+  
+  #armazenar as métricas para comparação 
+  mlflow_log_metric("precisão", precisao)
+  mlflow_log_metric("sensibilidade", sensibilidade)
+  mlflow_log_metric("especificidade", especificidade)
+  mlflow_log_metric("AUC", auc) 
+  
+  #armazenar modelo
+  predictor <- crate(function(x) {
+    stats::predict(model,x)
+    }, model = rl)
+  mlflow_log_model(predictor, "regressao_logistica")
+                     
+  #curva ROC
+  roc=av$roc+xlab("erros de previsão")+ylab("acertos de previsão")+theme_bw()+
+  theme(legend.position="none")+
+  geom_text(aes(x=0.94, y=0.185, label=paste("AUC:",av$stdres$Group1[13,1])))
+  
+  ggsave(filename = "/dbfs/user/hive/warehouse/dados_ouro.db/roc_regressao.png", roc, device='png')
+  
+  #armazenar a curva ROC
+  mlflow_log_artifact("/dbfs/user/hive/warehouse/dados_ouro.db/roc_regressao.png") 
+    
+})

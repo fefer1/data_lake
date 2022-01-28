@@ -1,8 +1,0 @@
-%py #identificador de linguagem python
-
-#criar mount para link entre conta de armazenamento e databricks
-dbutils.fs.mount(
-  source = "wasbs://<nome-do-conteiner>@<nome-da-conta-de-armazenamento>.blob.core.windows.net",
-  mount_point = "/mnt/<nome-do-conteiner>",
-  extra_configs = {"fs.azure.sas.<nome-do-conteiner>.<nome-da-conta-de-armazenamento>.blob.core.windows.net":
-                   "<token-sas>"})

@@ -9,7 +9,7 @@ library(e1071);library(pROC);library(MLmetrics);library(plotROC);library(MLeval)
 #lendo o banco de dados para treino do modelo
 bank_train=read.df("/user/hive/warehouse/dados_ouro.db/bank_train", sep=";", header = "true", inferSchema = "true") %>% as.data.frame()
 
-#aplicação do modelo de regressão logistica
+#execução do modelo de regressão logistica
 with(mlflow_start_run(), {
   
   #setseed
